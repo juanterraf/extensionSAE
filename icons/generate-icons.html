@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SAE Icons</title>
+  <style>
+    body { font-family: system-ui; padding: 40px; background: #f7f6f3; }
+    .preview { display: flex; gap: 24px; align-items: end; margin: 20px 0; }
+    .preview div { text-align: center; font-size: 12px; color: #787774; }
+    canvas { border: 1px solid #e3e2de; background: #fff; border-radius: 8px; }
+    button { padding: 12px 24px; font-size: 14px; cursor: pointer; background: #37352f; color: white; border: none; border-radius: 6px; margin: 8px 4px; }
+    button:hover { background: #1a1a1a; }
+    .note { margin-top: 16px; color: #787774; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>SAE Tucuman - Generar Iconos</h1>
+  <p>Libro abierto estilo Notion</p>
+
+  <div class="preview">
+    <div><canvas id="c128" width="128" height="128"></canvas><br>128px</div>
+    <div><canvas id="c48" width="48" height="48"></canvas><br>48px</div>
+    <div><canvas id="c16" width="16" height="16"></canvas><br>16px</div>
+  </div>
+
+  <button onclick="downloadAll()">Descargar los 3 PNGs</button>
+  <button onclick="downloadOne(128)">Solo 128px</button>
+  <button onclick="downloadOne(48)">Solo 48px</button>
+  <button onclick="downloadOne(16)">Solo 16px</button>
+
+  <p class="note">Despues de descargar, reemplaza los archivos icon16.png, icon48.png e icon128.png en la carpeta icons/ y recarga la extension.</p>
+
+<script>
+function drawIcon(size) {
+  const canvas = document.getElementById('c' + size);
+  const ctx = canvas.getContext('2d');
+  const s = size / 128;
+  ctx.clearRect(0, 0, size, size);
+
+  // Rounded square background
+  const r = size * 0.18;
+  const pad = size * 0.02;
+  ctx.beginPath();
+  ctx.roundRect(pad, pad, size - pad*2, size - pad*2, r);
+  ctx.fillStyle = '#37352f';
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(size/2, size/2 + 2*s);
+
+  // Left page
+  ctx.beginPath();
+  ctx.moveTo(-2*s, -26*s);
+  ctx.bezierCurveTo(-5*s, -24*s, -34*s, -22*s, -36*s, -18*s);
+  ctx.lineTo(-36*s, 22*s);
+  ctx.bezierCurveTo(-34*s, 18*s, -5*s, 20*s, -2*s, 24*s);
+  ctx.closePath();
+  ctx.fillStyle = '#e3e2de';
+  ctx.fill();
+
+  // Right page
+  ctx.beginPath();
+  ctx.moveTo(2*s, -26*s);
+  ctx.bezierCurveTo(5*s, -24*s, 34*s, -22*s, 36*s, -18*s);
+  ctx.lineTo(36*s, 22*s);
+  ctx.bezierCurveTo(34*s, 18*s, 5*s, 20*s, 2*s, 24*s);
+  ctx.closePath();
+  ctx.fillStyle = '#f7f6f3';
+  ctx.fill();
+
+  // Spine
+  ctx.beginPath();
+  ctx.moveTo(0, -28*s);
+  ctx.lineTo(0, 26*s);
+  ctx.strokeStyle = '#b4b4b0';
+  ctx.lineWidth = 2*s;
+  ctx.stroke();
+
+  // Text lines left
+  ctx.strokeStyle = '#b4b4b0';
+  ctx.lineWidth = 1.8*s;
+  ctx.lineCap = 'round';
+  for (var i = 0; i < 3; i++) {
+    var y = -10*s + i*10*s;
+    ctx.beginPath();
+    ctx.moveTo(-28*s, y);
+    ctx.lineTo(-12*s, y);
+    ctx.stroke();
+  }
+
+  // Text lines right
+  ctx.strokeStyle = '#c4c3bf';
+  for (var i = 0; i < 3; i++) {
+    var y = -10*s + i*10*s;
+    ctx.beginPath();
+    ctx.moveTo(10*s, y);
+    ctx.lineTo(28*s, y);
+    ctx.stroke();
+  }
+
+  // Accent dot
+  ctx.beginPath();
+  ctx.arc(14*s, -18*s, 3.5*s, 0, Math.PI * 2);
+  ctx.fillStyle = '#2383e2';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+[128, 48, 16].forEach(drawIcon);
+
+function downloadOne(size) {
+  var canvas = document.getElementById('c' + size);
+  var link = document.createElement('a');
+  link.download = 'icon' + size + '.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+function downloadAll() {
+  [16, 48, 128].forEach(function(s) {
+    setTimeout(function() { downloadOne(s); }, s * 10);
+  });
+}
+</script>
+</body>
+</html>

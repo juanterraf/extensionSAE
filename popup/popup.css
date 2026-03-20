@@ -184,6 +184,14 @@ body {
 }
 .btn-accent:hover:not(:disabled) { background: var(--accent-hover); }
 
+.btn-ai {
+  background: linear-gradient(135deg, #7c3aed 0%, #2383e2 100%);
+  color: white;
+}
+.btn-ai:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6d28d9 0%, #1b6ec2 100%);
+}
+
 .btn-download {
   background: var(--success);
   color: white;
@@ -873,6 +881,19 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ---- Warning banner ---- */
+.warning-banner {
+  background: var(--warning-light);
+  border: 1px solid #e8c97a;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #92710c;
+  text-align: center;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
 
 /* ---- Spinner ---- */
 .spinner {

@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initEventListeners();
   initMonitorListeners();
   initImportListeners();
+  initAIListeners();
 
   // Footer link opens in new tab
   $$('.status-bar a').forEach(a => {
@@ -1438,10 +1439,53 @@ function initImportListeners() {
   $('#btn-follow-all').addEventListener('click', followAllImported);
   $('#sel-import-center').addEventListener('change', onImportCenterChange);
   $('#sel-import-jurisdiction').addEventListener('change', validateImportForm);
+
+  // Restore last import results if popup was closed during import
+  restoreLastImport();
   $('#sel-col-filter').addEventListener('change', () => {
     const hasFilter = $('#sel-col-filter').value;
     $('#filter-value-section').classList.toggle('hidden', !hasFilter);
   });
+}
+
+async function restoreLastImport() {
+  const data = await chrome.storage.local.get('sae_last_import');
+  const results = data.sae_last_import;
+  if (!results || !results.length) return;
+
+  state.importResults = results;
+  // Show results view
+  $('#import-upload').classList.add('hidden');
+  $('#import-config').classList.add('hidden');
+  $('#import-progress').classList.remove('hidden');
+  $('#btn-cancel-import').classList.add('hidden');
+  $('#btn-export-results').classList.remove('hidden');
+
+  // Hide warning banner in restored view
+  const warning = $('#import-progress .warning-banner');
+  if (warning) warning.classList.add('hidden');
+
+  const okCount = results.filter(r => r.status === 'ok').length;
+  const errCount = results.filter(r => r.status === 'error').length;
+  let summary = `${okCount} OK`;
+  if (errCount) summary += `, ${errCount} errores`;
+  $('#import-progress-text').textContent = `Ultima importacion: ${summary} de ${results.length}`;
+  $('#import-progress-fill').style.width = '100%';
+
+  if (okCount > 0) {
+    $('#btn-follow-all').classList.remove('hidden');
+    $('#btn-follow-all').textContent = `Seguir ${okCount} expedientes`;
+  }
+
+  // Render results table
+  let tableHtml = '<table><thead><tr><th></th><th>Exp.</th><th>Fuero</th><th>Ultimo Tramite</th><th>Fecha</th></tr></thead><tbody>';
+  results.forEach((r, i) => {
+    const cls = r.status === 'ok' ? 'import-row-ok' : r.status === 'skip' ? 'import-row-skip' : 'import-row-err';
+    const label = r.status === 'ok' ? 'OK' : r.status === 'skip' ? '---' : 'ERR';
+    tableHtml += `<tr class="${cls}"><td>${label}</td><td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.fuero || '')}</td><td>${escapeHtml(r.tramite || '')}</td><td>${r.fecha || ''}</td></tr>`;
+  });
+  tableHtml += '</tbody></table>';
+  $('#import-results').innerHTML = tableHtml;
 }
 
 function handleFileUpload(file) {
@@ -1543,6 +1587,7 @@ function resetImport() {
   state.importData = [];
   state.importHeaders = [];
   state.importResults = [];
+  chrome.storage.local.remove('sae_last_import');
   $('#import-upload').classList.remove('hidden');
   $('#import-config').classList.add('hidden');
   $('#import-progress').classList.add('hidden');
@@ -1789,6 +1834,9 @@ async function startImport() {
     $('#btn-follow-all').classList.remove('hidden');
     $('#btn-follow-all').textContent = `Seguir ${okCount} expedientes`;
   }
+
+  // Save results to storage so they survive popup close
+  chrome.storage.local.set({ sae_last_import: state.importResults });
 }
 
 function updateImportRow(row, status, fuero, tramite, fecha) {
@@ -1859,4 +1907,144 @@ function exportResults() {
 
   XLSX.writeFile(wb, `SAE_Consulta_${new Date().toISOString().slice(0, 10)}.xlsx`);
   showToast('Excel exportado', 'success');
+}
+
+// ============================================
+// FEATURE: GEMINI AI REPORTS
+// ============================================
+
+// Init AI listeners
+function initAIListeners() {
+  $('#btn-save-key').addEventListener('click', saveGeminiKey);
+  $('#btn-ai-report').addEventListener('click', generateAIReport);
+
+  // Load saved key
+  chrome.storage.local.get('sae_gemini_key', (data) => {
+    if (data.sae_gemini_key) {
+      $('#inp-gemini-key').value = data.sae_gemini_key;
+    }
+  });
+}
+
+function saveGeminiKey() {
+  const key = $('#inp-gemini-key').value.trim();
+  if (!key) {
+    showToast('Ingresa una API key', 'error');
+    return;
+  }
+  chrome.storage.local.set({ sae_gemini_key: key });
+  showToast('API Key guardada', 'success');
+}
+
+async function getGeminiKey() {
+  const data = await chrome.storage.local.get('sae_gemini_key');
+  return data.sae_gemini_key || null;
+}
+
+async function generateAIReport() {
+  if (!state.currentCase || !state.tramites.length) {
+    showToast('No hay expediente cargado', 'error');
+    return;
+  }
+
+  const apiKey = await getGeminiKey();
+  if (!apiKey) {
+    showToast('Configura tu API Key de Gemini en la pestaña Info', 'error');
+    // Switch to info tab
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    $$('.tab-content').forEach(c => c.classList.remove('active'));
+    $$('.tab')[4].classList.add('active');
+    $('#tab-info').classList.add('active');
+    $('#inp-gemini-key').focus();
+    return;
+  }
+
+  const btn = $('#btn-ai-report');
+  btn.textContent = 'Cargando textos...';
+  btn.disabled = true;
+
+  try {
+    // Fetch texts for all tramites that don't have them yet
+    const toFetch = state.tramites.filter(t => !t.texto && t.link);
+    for (let i = 0; i < toFetch.length; i++) {
+      btn.textContent = `Textos (${i + 1}/${toFetch.length})...`;
+      toFetch[i].texto = await getTramiteText(state.currentCase, toFetch[i].histid);
+    }
+
+    btn.textContent = 'Analizando con IA...';
+
+    // Build context for the AI
+    const caseData = state.currentCase;
+    const tramitesText = state.tramites.map((t, i) => {
+      const texto = t.texto ? htmlToPlainText(t.texto) : '';
+      const preview = texto.length > 500 ? texto.substring(0, 500) + '...' : texto;
+      return `[${i + 1}] ${t.fecha || 'S/F'} - ${t.dscr || ''}\n${preview}`;
+    }).join('\n\n');
+
+    const prompt = `Sos un abogado argentino experto en derecho procesal. Analiza el siguiente expediente judicial y genera un informe profesional en español.
+
+EXPEDIENTE: ${caseData.nro_expediente || 'N/D'}
+CARATULA: ${caseData.caratula || 'N/D'}
+ACTOR: ${caseData.acto || caseData.actor || 'N/D'}
+DEMANDADO: ${caseData.dema || caseData.demandado || 'N/D'}
+JUZGADO: ${caseData.juzgado?.dscr || 'N/D'}
+TIPO DE PROCESO: ${caseData.tipo_proceso || 'N/D'}
+TOTAL DE TRAMITES: ${state.tramites.length}
+
+CRONOLOGIA DE TRAMITES:
+${tramitesText}
+
+Genera un informe con las siguientes secciones:
+1. RESUMEN EJECUTIVO (2-3 oraciones sobre el estado actual de la causa)
+2. OBJETO DE LA CAUSA (que se reclama/disputa)
+3. PARTES INTERVINIENTES
+4. CRONOLOGIA PROCESAL RELEVANTE (solo los hitos importantes, no todos los tramites)
+5. ESTADO ACTUAL Y PROXIMOS PASOS PROBABLES
+6. OBSERVACIONES (plazos vencidos, irregularidades, o puntos de atencion)
+
+Se conciso y profesional. No inventes datos que no esten en los tramites.`;
+
+    const response = await callGemini(apiKey, prompt);
+
+    $('#summary-title').textContent = 'Informe IA';
+    $('#summary-content').textContent = response;
+    $('#summary-section').classList.remove('hidden');
+    $('#summary-section').scrollIntoView({ behavior: 'smooth' });
+
+  } catch (err) {
+    if (err.message.includes('API_KEY_INVALID') || err.message.includes('401')) {
+      showToast('API Key invalida. Verifica en la pestaña Info.', 'error');
+    } else {
+      showToast('Error IA: ' + err.message, 'error');
+    }
+  } finally {
+    btn.textContent = 'Informe IA';
+    btn.disabled = false;
+  }
+}
+
+async function callGemini(apiKey, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 2000,
+      },
+    }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(err.substring(0, 200));
+  }
+
+  const json = await resp.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Respuesta vacia de Gemini');
+  return text;
 }

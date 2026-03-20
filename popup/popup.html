@@ -100,7 +100,8 @@
             <button id="btn-summary-last" class="btn btn-secondary">Ultimo tramite</button>
             <button id="btn-summary-full" class="btn btn-secondary">Informe general</button>
           </div>
-          <button id="btn-download-all" class="btn btn-accent">Descargar todo (ZIP)</button>
+          <button id="btn-ai-report" class="btn btn-ai">Informe IA</button>
+          <button id="btn-download-all" class="btn btn-secondary">Descargar todo (ZIP)</button>
         </div>
 
         <div id="summary-section" class="hidden">
@@ -121,6 +122,7 @@
         </div>
 
         <div id="download-progress" class="hidden">
+          <div class="warning-banner">No cierres esta ventana mientras se descarga</div>
           <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
           <p id="progress-text" class="progress-text">Preparando descarga...</p>
         </div>
@@ -196,6 +198,7 @@
       </div>
 
       <div id="import-progress" class="hidden">
+        <div class="warning-banner">No cierres esta ventana mientras se importa</div>
         <div class="progress-bar"><div id="import-progress-fill" class="progress-fill"></div></div>
         <p id="import-progress-text" class="progress-text">Procesando...</p>
         <div id="import-results" class="import-results"></div>
@@ -246,6 +249,26 @@
           <li>Cada tramite se descarga como PDF si esta disponible, o como texto</li>
           <li>Se incluye un informe general automatico en el ZIP</li>
         </ul>
+      </div>
+
+      <div class="info-section">
+        <h3>Informe con IA</h3>
+        <ul>
+          <li>Obtene una API key gratis en <strong>aistudio.google.com</strong></li>
+          <li>Pegala en la configuracion de la pestaña Expediente</li>
+          <li>Desde un expediente, usa "Informe IA" para obtener un analisis inteligente</li>
+        </ul>
+      </div>
+
+      <hr class="info-divider">
+
+      <div class="info-section">
+        <h3>Configuracion IA</h3>
+        <div class="form-group">
+          <label for="inp-gemini-key">API Key de Google AI Studio (Gemini)</label>
+          <input type="password" id="inp-gemini-key" placeholder="AIza...">
+        </div>
+        <button id="btn-save-key" class="btn btn-secondary" style="margin-top:4px">Guardar API Key</button>
       </div>
 
       <hr class="info-divider">
