@@ -81,6 +81,7 @@ function initEventListeners() {
   $('#btn-summary-last').addEventListener('click', () => generateSummary('last'));
   $('#btn-summary-full').addEventListener('click', () => generateSummary('full'));
   $('#btn-download-all').addEventListener('click', downloadAll);
+  $('#btn-send-notebooklm').addEventListener('click', sendToNotebookLM);
   $('#btn-copy-summary').addEventListener('click', copySummary);
   $('#btn-load-more').addEventListener('click', loadMore);
 
@@ -2033,6 +2034,322 @@ IMPORTANTE: No inventes datos. Si algo no surge de los tramites, indicalo. Usa l
     btn.textContent = 'Informe IA';
     btn.disabled = false;
   }
+}
+
+// ============================================
+// NotebookLM Integration
+// ============================================
+
+async function sendToNotebookLM() {
+  if (!state.currentCase || !state.tramites.length) {
+    showToast('No hay trámites para enviar', 'error');
+    return;
+  }
+
+  const btn = $('#btn-send-notebooklm');
+  btn.disabled = true;
+  btn.textContent = 'Preparando...';
+
+  const progressEl = $('#download-progress');
+  const progressFill = $('#progress-fill');
+  const progressText = $('#progress-text');
+  progressEl.classList.remove('hidden');
+  progressText.textContent = 'Abriendo NotebookLM...';
+  progressFill.style.width = '0%';
+
+  try {
+    const caseData = state.currentCase;
+    const expNum = caseData.nro_expediente || 'sin_numero';
+    const caratula = caseData.caratula || 'Expediente';
+    const notebookTitle = `${caratula} - Exp. ${expNum}`;
+
+    // Step 1: Find or open NotebookLM tab
+    progressText.textContent = 'Buscando pestaña de NotebookLM...';
+    let nlmTab = await findNotebookLMTab();
+
+    if (!nlmTab) {
+      // Open NotebookLM
+      nlmTab = await chrome.tabs.create({ url: 'https://notebooklm.google.com/', active: false });
+      progressText.textContent = 'Esperando que cargue NotebookLM...';
+      await waitForTabLoad(nlmTab.id, 15000);
+      // Give it extra time to initialize JS
+      await sleep(3000);
+    }
+
+    // Step 2: Inject bridge script
+    progressText.textContent = 'Conectando con NotebookLM...';
+    progressFill.style.width = '10%';
+
+    await chrome.scripting.executeScript({
+      target: { tabId: nlmTab.id },
+      files: ['content/notebooklm-bridge.js'],
+      world: 'MAIN',
+    });
+    await sleep(1000);
+
+    // Step 3: Create notebook via bridge
+    progressText.textContent = 'Creando notebook...';
+    progressFill.style.width = '15%';
+
+    const createResult = await chrome.scripting.executeScript({
+      target: { tabId: nlmTab.id },
+      world: 'MAIN',
+      func: async () => {
+        try {
+          const bridge = window.__SAE_NLM_BRIDGE;
+          if (!bridge?.ready) throw new Error('Bridge no disponible');
+          const projectId = await bridge.createNotebook();
+          return { success: true, projectId };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      },
+    });
+
+    const createData = createResult?.[0]?.result;
+    if (!createData?.success) {
+      throw new Error(createData?.error || 'No se pudo crear el notebook');
+    }
+    const projectId = createData.projectId;
+
+    // Step 4: Navigate to the new notebook
+    await chrome.tabs.update(nlmTab.id, {
+      url: `https://notebooklm.google.com/notebook/${projectId}`,
+    });
+    await waitForTabLoad(nlmTab.id, 10000);
+    await sleep(2000);
+
+    // Re-inject bridge (new page navigation)
+    await chrome.scripting.executeScript({
+      target: { tabId: nlmTab.id },
+      files: ['content/notebooklm-bridge.js'],
+      world: 'MAIN',
+    });
+    await sleep(1000);
+
+    // Step 5: Build consolidated text with all tramites
+    progressText.textContent = 'Preparando textos...';
+    progressFill.style.width = '20%';
+
+    // Fetch texts for all tramites that don't have them yet
+    const tramitesForText = [];
+    for (let i = 0; i < state.tramites.length; i++) {
+      const t = state.tramites[i];
+      if (!t.texto && t.link) {
+        try {
+          progressText.textContent = `Obteniendo texto ${i + 1}/${state.tramites.length}...`;
+          t.texto = await getTramiteText(caseData, t.histid);
+        } catch {}
+      }
+      tramitesForText.push(t);
+    }
+
+    // Build text blocks - one consolidated source with all tramites info
+    const headerText = [
+      `EXPEDIENTE: ${expNum}`,
+      `CARATULA: ${caratula}`,
+      `ACTOR: ${caseData.acto || caseData.actor || 'N/D'}`,
+      `DEMANDADO: ${caseData.dema || caseData.demandado || 'N/D'}`,
+      `JUZGADO: ${caseData.juzgado?.dscr || 'N/D'}`,
+      `TIPO: ${caseData.tipo_proceso || 'N/D'}`,
+      `TOTAL TRAMITES: ${state.tramites.length}`,
+      '',
+      '═══════════════════════════════════',
+      '',
+    ].join('\n');
+
+    const tramitesTexts = tramitesForText.map((t, i) => {
+      const text = t.texto ? htmlToPlainText(t.texto) : '';
+      const parts = [`[${i + 1}] ${t.fecha || 'S/F'} - ${t.dscr || 'Sin descripcion'}`];
+      if (text) parts.push(text);
+      if (t.firm) parts.push(`[Firmado: ${t.fechaFirma || 'Si'}]`);
+      return parts.join('\n');
+    });
+
+    const fullText = headerText + tramitesTexts.join('\n\n---\n\n');
+
+    // Step 6: Add text as source
+    progressText.textContent = 'Agregando texto del expediente...';
+    progressFill.style.width = '30%';
+
+    // Split into chunks if text is very long (max ~500KB per source)
+    const MAX_TEXT_SIZE = 400000;
+    const textChunks = [];
+    if (fullText.length > MAX_TEXT_SIZE) {
+      // Split by tramites
+      let currentChunk = headerText;
+      let chunkNum = 1;
+      for (const tt of tramitesTexts) {
+        if ((currentChunk + tt).length > MAX_TEXT_SIZE && currentChunk.length > headerText.length) {
+          textChunks.push({ title: `${notebookTitle} - Parte ${chunkNum}`, text: currentChunk });
+          chunkNum++;
+          currentChunk = headerText;
+        }
+        currentChunk += tt + '\n\n---\n\n';
+      }
+      if (currentChunk.length > headerText.length) {
+        textChunks.push({ title: `${notebookTitle} - Parte ${chunkNum}`, text: currentChunk });
+      }
+    } else {
+      textChunks.push({ title: `Tramites - ${notebookTitle}`, text: fullText });
+    }
+
+    for (let i = 0; i < textChunks.length; i++) {
+      const chunk = textChunks[i];
+      progressText.textContent = `Subiendo texto ${i + 1}/${textChunks.length}...`;
+
+      const textResult = await chrome.scripting.executeScript({
+        target: { tabId: nlmTab.id },
+        world: 'MAIN',
+        func: async (pid, title, content) => {
+          try {
+            await window.__SAE_NLM_BRIDGE.addTextSource(pid, title, content);
+            return { success: true };
+          } catch (err) {
+            return { success: false, error: err.message };
+          }
+        },
+        args: [projectId, chunk.title, chunk.text],
+      });
+
+      if (!textResult?.[0]?.result?.success) {
+        console.warn('Text source failed:', textResult?.[0]?.result?.error);
+      }
+      await sleep(1500);
+    }
+
+    // Step 7: Upload PDFs
+    const pdfTramites = [];
+    for (let i = 0; i < state.tramites.length; i++) {
+      const t = state.tramites[i];
+      // Check if this tramite has a downloadable PDF
+      pdfTramites.push({ index: i, tramite: t });
+    }
+
+    // Ask user if too many PDFs
+    const MAX_PDFS = 30;
+    let pdfsToUpload = pdfTramites;
+    if (pdfsToUpload.length > MAX_PDFS) {
+      pdfsToUpload = pdfsToUpload.slice(0, MAX_PDFS);
+      showToast(`Subiendo los primeros ${MAX_PDFS} PDFs de ${pdfTramites.length}`, 'info');
+    }
+
+    let pdfSuccess = 0;
+    let pdfFail = 0;
+    const totalSteps = textChunks.length + pdfsToUpload.length;
+
+    for (let i = 0; i < pdfsToUpload.length; i++) {
+      const { index, tramite: t } = pdfsToUpload[i];
+      const num = String(index + 1).padStart(3, '0');
+      const dateStr = t.fech || (t.fecha ? t.fecha.replace(/\//g, '-') : 'sf');
+      const desc = sanitizeFilename(t.dscr || 'tramite');
+      const filename = `${num}_${dateStr}_${desc}.pdf`;
+
+      const pct = 30 + Math.round(((textChunks.length + i) / totalSteps) * 70);
+      progressFill.style.width = `${pct}%`;
+      progressText.textContent = `Subiendo PDF ${i + 1}/${pdfsToUpload.length}: ${t.dscr || 'tramite'}...`;
+
+      try {
+        // Get PDF URL
+        const pdfUrl = await getTramitePdfUrl(caseData, t.histid);
+        if (!pdfUrl) {
+          pdfFail++;
+          continue;
+        }
+
+        // Download PDF bytes via background worker
+        const pdfData = await downloadUrl(pdfUrl);
+        if (!pdfData?.base64) {
+          pdfFail++;
+          continue;
+        }
+
+        // Upload to NotebookLM
+        const uploadResult = await chrome.scripting.executeScript({
+          target: { tabId: nlmTab.id },
+          world: 'MAIN',
+          func: async (pid, fname, base64Data) => {
+            try {
+              // Convert base64 to Uint8Array
+              const binary = atob(base64Data);
+              const bytes = new Uint8Array(binary.length);
+              for (let j = 0; j < binary.length; j++) {
+                bytes[j] = binary.charCodeAt(j);
+              }
+              await window.__SAE_NLM_BRIDGE.uploadPdf(pid, fname, bytes);
+              return { success: true };
+            } catch (err) {
+              return { success: false, error: err.message };
+            }
+          },
+          args: [projectId, filename, pdfData.base64],
+        });
+
+        if (uploadResult?.[0]?.result?.success) {
+          pdfSuccess++;
+        } else {
+          console.warn(`PDF upload failed for ${filename}:`, uploadResult?.[0]?.result?.error);
+          pdfFail++;
+        }
+      } catch (err) {
+        console.warn(`PDF error for ${filename}:`, err.message);
+        pdfFail++;
+      }
+
+      // Rate limiting
+      await sleep(2000);
+    }
+
+    // Done!
+    progressFill.style.width = '100%';
+    const msg = pdfFail > 0
+      ? `NotebookLM: ${textChunks.length} texto(s) + ${pdfSuccess} PDF(s) subidos (${pdfFail} fallaron)`
+      : `NotebookLM: ${textChunks.length} texto(s) + ${pdfSuccess} PDF(s) subidos`;
+    progressText.textContent = msg;
+    showToast(msg, 'success');
+
+    // Focus the NotebookLM tab
+    chrome.tabs.update(nlmTab.id, { active: true });
+
+  } catch (err) {
+    console.error('NotebookLM error:', err);
+    showToast('Error NotebookLM: ' + err.message, 'error');
+    progressText.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Enviar a NotebookLM';
+    setTimeout(() => progressEl.classList.add('hidden'), 5000);
+  }
+}
+
+// Helper: find existing NotebookLM tab
+async function findNotebookLMTab() {
+  const tabs = await chrome.tabs.query({ url: 'https://notebooklm.google.com/*' });
+  return tabs[0] || null;
+}
+
+// Helper: wait for tab to finish loading
+function waitForTabLoad(tabId, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(); // Resolve anyway, don't block
+    }, timeout);
+
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+// Helper: sleep
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 async function callGemini(apiKey, prompt) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SAE Tucuman - Asistente de Expedientes",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Consulta, resume y descarga expedientes judiciales del portal SAE de Tucuman. Seguimiento automatico de causas con notificaciones.",
   "author": "Juan Pablo Terraf",
   "homepage_url": "https://derechointeligente.com.ar",
@@ -17,7 +17,8 @@
   "host_permissions": [
     "https://consultaexpedientes.justucuman.gov.ar/*",
     "https://conexpbe.justucuman.gov.ar/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://notebooklm.google.com/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
