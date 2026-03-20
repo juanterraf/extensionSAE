@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "SAE Tucuman - Asistente de Expedientes",
+  "version": "1.0.0",
+  "description": "Consulta, resume y descarga expedientes judiciales del portal SAE de Tucuman. Seguimiento automatico de causas con notificaciones.",
+  "author": "Juan Pablo Terraf",
+  "homepage_url": "https://derechointeligente.com.ar",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "downloads",
+    "scripting",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://consultaexpedientes.justucuman.gov.ar/*",
+    "https://conexpbe.justucuman.gov.ar/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://consultaexpedientes.justucuman.gov.ar/*"],
+      "js": ["content/content-script.js"],
+      "css": ["content/content-style.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://consultaexpedientes.justucuman.gov.ar/*"],
+      "js": ["content/inject-interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}

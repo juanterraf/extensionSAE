@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAE Tucuman</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-title">
+        <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+        </svg>
+        <h1>SAE Tucuman</h1>
+      </div>
+      <p class="header-subtitle">Asistente de Expedientes Judiciales</p>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="search">Buscar</button>
+      <button class="tab" data-tab="current">Expediente</button>
+      <button class="tab" data-tab="monitor">Seguimiento</button>
+      <button class="tab" data-tab="import">Importar</button>
+      <button class="tab" data-tab="info">Info</button>
+    </nav>
+
+    <!-- ========== SEARCH TAB ========== -->
+    <section id="tab-search" class="tab-content active">
+      <div class="form-group">
+        <label for="sel-center">Centro Judicial</label>
+        <select id="sel-center">
+          <option value="">Cargando...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="sel-jurisdiction">Fuero</label>
+        <select id="sel-jurisdiction">
+          <option value="">Seleccione un centro primero</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="inp-number">N Expediente</label>
+        <input type="text" id="inp-number" placeholder="Ej: 1234/20">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="inp-actor">Actor</label>
+          <input type="text" id="inp-actor" placeholder="Apellido">
+        </div>
+        <div class="form-group">
+          <label for="inp-accused">Demandado</label>
+          <input type="text" id="inp-accused" placeholder="Apellido">
+        </div>
+      </div>
+      <button id="btn-search" class="btn btn-primary" disabled>
+        <span class="btn-text">Buscar</span>
+        <span class="btn-loading hidden">Buscando...</span>
+      </button>
+      <div id="search-results" class="hidden">
+        <h3 class="results-title">Resultados</h3>
+        <div id="results-list" class="results-list"></div>
+        <button id="btn-load-more" class="btn btn-secondary hidden" style="margin-top:6px">Cargar mas</button>
+      </div>
+      <div id="search-empty" class="empty-state hidden">
+        <p>No se encontraron expedientes</p>
+      </div>
+
+      <!-- History integrated into search -->
+      <div id="history-section" class="history-section hidden">
+        <div class="history-section-title">Recientes</div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </section>
+
+    <!-- ========== CURRENT CASE TAB ========== -->
+    <section id="tab-current" class="tab-content">
+      <div id="current-empty" class="empty-state">
+        <p>Navega a un expediente en el portal SAE o busca uno desde la pestaña Buscar</p>
+      </div>
+      <div id="current-case" class="hidden">
+        <div class="case-header">
+          <h3 id="case-title" class="case-title"></h3>
+          <span id="case-number" class="case-badge"></span>
+        </div>
+        <div class="case-meta">
+          <div class="meta-row"><span class="meta-label">Actor</span><span id="case-actor" class="meta-value"></span></div>
+          <div class="meta-row"><span class="meta-label">Demandado</span><span id="case-accused" class="meta-value"></span></div>
+          <div class="meta-row"><span class="meta-label">Juzgado</span><span id="case-court" class="meta-value"></span></div>
+          <div class="meta-row"><span class="meta-label">Tipo</span><span id="case-type" class="meta-value"></span></div>
+        </div>
+
+        <div class="action-buttons">
+          <button id="btn-follow-case" class="btn btn-follow">Seguir expediente</button>
+          <div class="form-row">
+            <button id="btn-summary-last" class="btn btn-secondary">Ultimo tramite</button>
+            <button id="btn-summary-full" class="btn btn-secondary">Informe general</button>
+          </div>
+          <button id="btn-download-all" class="btn btn-accent">Descargar todo (ZIP)</button>
+        </div>
+
+        <div id="summary-section" class="hidden">
+          <div class="summary-header">
+            <h3 id="summary-title">Resumen</h3>
+            <button id="btn-copy-summary" class="btn-icon" title="Copiar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+          </div>
+          <div id="summary-content" class="summary-content"></div>
+        </div>
+
+        <div id="tramites-section" class="hidden">
+          <h3 class="section-title">Tramites</h3>
+          <div id="tramites-list" class="tramites-list"></div>
+        </div>
+
+        <div id="download-progress" class="hidden">
+          <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+          <p id="progress-text" class="progress-text">Preparando descarga...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== MONITOR TAB ========== -->
+    <section id="tab-monitor" class="tab-content">
+      <div id="monitor-empty" class="empty-state">
+        <p>No estas siguiendo ningun expediente.<br>Abri un expediente y usa "Seguir expediente".</p>
+      </div>
+      <div id="monitor-content" class="hidden">
+        <div class="monitor-toolbar">
+          <span id="monitor-count" class="monitor-count"></span>
+          <button id="btn-check-all" class="btn-sm btn-primary">Verificar todos</button>
+        </div>
+        <div id="monitor-list" class="monitor-list"></div>
+      </div>
+    </section>
+
+    <!-- ========== IMPORT TAB ========== -->
+    <section id="tab-import" class="tab-content">
+      <div id="import-upload">
+        <div id="drop-zone" class="drop-zone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p>Arrastra un archivo .xlsx o .csv</p>
+          <p class="drop-zone-hint">o hace click para seleccionar</p>
+        </div>
+        <input type="file" id="inp-file" accept=".xlsx,.xls,.csv" hidden>
+      </div>
+
+      <div id="import-config" class="hidden">
+        <div class="import-file-info">
+          <span id="import-filename"></span>
+          <button id="btn-import-clear" class="btn-sm btn-danger">Cambiar</button>
+        </div>
+        <div class="form-group">
+          <label for="sel-col-number">Columna de Expediente</label>
+          <select id="sel-col-number"></select>
+        </div>
+        <div class="form-group">
+          <label for="sel-col-filter">Columna de filtro (opcional)</label>
+          <select id="sel-col-filter">
+            <option value="">Sin filtro</option>
+          </select>
+        </div>
+        <div id="filter-value-section" class="hidden">
+          <div class="form-group">
+            <label for="inp-filter-value">Buscar solo filas que contengan</label>
+            <input type="text" id="inp-filter-value" placeholder="Ej: CAPITAL, CONCEPC">
+          </div>
+          <p class="filter-hint">Las demas filas se marcaran como "Omitido"</p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sel-import-center">Centro Judicial</label>
+            <select id="sel-import-center"></select>
+          </div>
+          <div class="form-group">
+            <label for="sel-import-jurisdiction">Fuero</label>
+            <select id="sel-import-jurisdiction"></select>
+          </div>
+        </div>
+        <div id="import-preview-section">
+          <h4 class="section-title">Vista previa</h4>
+          <div id="import-preview" class="import-preview"></div>
+        </div>
+        <button id="btn-start-import" class="btn btn-primary" disabled>Iniciar consulta</button>
+      </div>
+
+      <div id="import-progress" class="hidden">
+        <div class="progress-bar"><div id="import-progress-fill" class="progress-fill"></div></div>
+        <p id="import-progress-text" class="progress-text">Procesando...</p>
+        <div id="import-results" class="import-results"></div>
+        <div class="import-actions">
+          <button id="btn-cancel-import" class="btn-sm btn-danger">Cancelar</button>
+          <button id="btn-follow-all" class="btn-sm btn-follow hidden">Seguir todos</button>
+          <button id="btn-export-results" class="btn-sm btn-download hidden">Exportar Excel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== INFO TAB ========== -->
+    <section id="tab-info" class="tab-content">
+      <div class="info-section">
+        <h3>Como usar</h3>
+        <ul>
+          <li>Abri <strong>consultaexpedientes.justucuman.gov.ar</strong> en otra pestaña</li>
+          <li>Navega a cualquier expediente y la extension lo detecta automaticamente</li>
+          <li>Tambien podes buscar desde la pestaña <strong>Buscar</strong> seleccionando centro y fuero</li>
+        </ul>
+      </div>
+
+      <div class="info-section">
+        <h3>Seguimiento</h3>
+        <ul>
+          <li>Usa "Seguir expediente" para monitorear cambios</li>
+          <li>La extension verifica automaticamente cada 30 minutos</li>
+          <li>Si hay movimientos nuevos, recibis una notificacion de Chrome</li>
+          <li>Los expedientes con novedades se resaltan en la pestaña Seguimiento</li>
+        </ul>
+      </div>
+
+      <div class="info-section">
+        <h3>Importacion masiva</h3>
+        <ul>
+          <li>Prepara un Excel (.xlsx) o CSV con una columna de numeros de expediente</li>
+          <li>Formato esperado: <code>1234/23</code> o <code>1234-2023</code></li>
+          <li>Selecciona centro judicial y fuero para la busqueda</li>
+          <li>La extension buscara en todos los fueros si no encuentra en el seleccionado</li>
+          <li>Necesitas tener la pagina del SAE abierta en el buscador (para el captcha)</li>
+        </ul>
+      </div>
+
+      <div class="info-section">
+        <h3>Descarga</h3>
+        <ul>
+          <li>Desde un expediente, usa "Descargar todo (ZIP)" para obtener PDFs y textos</li>
+          <li>Cada tramite se descarga como PDF si esta disponible, o como texto</li>
+          <li>Se incluye un informe general automatico en el ZIP</li>
+        </ul>
+      </div>
+
+      <hr class="info-divider">
+
+      <div class="info-credits">
+        <p>
+          <strong>Juan Pablo Terraf</strong><br>
+          <a href="https://derechointeligente.com.ar" target="_blank">derechointeligente.com.ar</a>
+        </p>
+        <p class="info-disclaimer">
+          Herramienta experimental y gratuita. El uso queda bajo la exclusiva responsabilidad de quien la utiliza.
+        </p>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="status-bar">
+      <a href="https://derechointeligente.com.ar" target="_blank">derechointeligente.com.ar</a>
+      <div class="status-right">
+        <span id="status-text"></span>
+        <span id="status-indicator" class="status-indicator online"></span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="../lib/jszip.min.js"></script>
+  <script src="../lib/xlsx.full.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
