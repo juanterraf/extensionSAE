@@ -16,6 +16,7 @@ let state = {
   preloadedStories: null,
   // Monitor
   followed: [],
+  monitorReports: [],
   // Import
   importData: [],
   importHeaders: [],
@@ -1273,6 +1274,23 @@ function updateFollowButton() {
 
 function initMonitorListeners() {
   $('#btn-check-all').addEventListener('click', checkAllFollowed);
+  $('#btn-monitor-ai-report').addEventListener('click', generateMonitorAIReport);
+  $('#btn-monitor-export-xl').addEventListener('click', exportMonitorExcel);
+  $('#chk-select-all-monitor').addEventListener('change', (e) => {
+    $$('.monitor-chk').forEach(chk => { chk.checked = e.target.checked; });
+    updateMonitorToolbar();
+  });
+}
+
+function getSelectedMonitorIndices() {
+  return [...$$('.monitor-chk:checked')].map(chk => parseInt(chk.dataset.index));
+}
+
+function updateMonitorToolbar() {
+  const count = getSelectedMonitorIndices().length;
+  $('#btn-monitor-ai-report').disabled = count === 0;
+  $('#btn-monitor-export-xl').disabled = !state.monitorReports?.length;
+  $('#btn-monitor-ai-report').textContent = count > 0 ? `Informe IA (${count})` : 'Informe IA';
 }
 
 function renderMonitorList() {
@@ -1312,6 +1330,7 @@ function renderMonitorList() {
     return `
       <div class="${cardClass}" data-index="${i}">
         <div class="monitor-card-top">
+          <input type="checkbox" class="monitor-chk" data-index="${i}" onclick="event.stopPropagation()">
           <div class="monitor-card-info">
             <div class="monitor-card-number">Exp. ${escapeHtml(f.nro_expediente)}</div>
             <div class="monitor-card-title">${escapeHtml(f.caratula)}</div>
@@ -1342,6 +1361,10 @@ function renderMonitorList() {
       state.followed.splice(parseInt(btn.dataset.index), 1);
       saveFollowed();
     });
+  });
+  // Checkbox change
+  container.querySelectorAll('.monitor-chk').forEach(chk => {
+    chk.addEventListener('change', () => updateMonitorToolbar());
   });
   // Click card to open case
   container.querySelectorAll('.monitor-card').forEach(card => {
@@ -1915,6 +1938,172 @@ function exportResults() {
 // ============================================
 // FEATURE: GEMINI AI REPORTS
 // ============================================
+
+// ============================================
+// Monitor AI Reports (batch)
+// ============================================
+
+async function generateMonitorAIReport() {
+  const selectedIndices = getSelectedMonitorIndices();
+  if (!selectedIndices.length) {
+    showToast('Selecciona al menos un expediente', 'error');
+    return;
+  }
+
+  const apiKey = await getGeminiKey();
+  if (!apiKey) {
+    showToast('Configura tu API Key de Gemini en la pestaña Info', 'error');
+    return;
+  }
+
+  const btn = $('#btn-monitor-ai-report');
+  const progressEl = $('#monitor-ai-progress');
+  const statusEl = $('#monitor-ai-status');
+  const fillEl = $('#monitor-ai-fill');
+  btn.disabled = true;
+  progressEl.classList.remove('hidden');
+  state.monitorReports = [];
+
+  const cases = selectedIndices.map(i => state.followed[i]).filter(Boolean);
+  let completed = 0;
+
+  for (const caseData of cases) {
+    completed++;
+    const pct = Math.round((completed / cases.length) * 100);
+    statusEl.textContent = `Analizando ${completed}/${cases.length}: Exp. ${caseData.nro_expediente}...`;
+    fillEl.style.width = `${pct}%`;
+
+    try {
+      // Fetch tramites for this case
+      statusEl.textContent = `Obteniendo tramites de ${caseData.nro_expediente}...`;
+      const data = await apiGet('/proceedings/history', {
+        proceeding: caseData.procid,
+        jurisdiction: caseData.jurisdiction_id,
+      });
+
+      let tramites = [];
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        tramites = Array.isArray(data.stories) ? data.stories : [];
+      } else {
+        tramites = Array.isArray(data) ? data : [];
+      }
+
+      // Fetch texts for tramites that need it
+      const toFetch = tramites.filter(t => !t.texto && t.link);
+      for (let i = 0; i < Math.min(toFetch.length, 10); i++) {
+        statusEl.textContent = `Textos ${caseData.nro_expediente} (${i + 1}/${Math.min(toFetch.length, 10)})...`;
+        try {
+          toFetch[i].texto = await getTramiteText(caseData, toFetch[i].histid);
+        } catch { /* skip */ }
+      }
+
+      // Build AI prompt
+      statusEl.textContent = `IA analizando ${caseData.nro_expediente}...`;
+      const tramitesText = tramites.slice(0, 20).map((t, i) => {
+        const texto = t.texto ? htmlToPlainText(t.texto) : '';
+        const content = texto.length > 800 ? texto.substring(0, 800) + '...' : texto;
+        return `[${i + 1}] ${t.fecha || 'S/F'} | ${t.dscr || ''}\n${content}`;
+      }).join('\n---\n');
+
+      const prompt = `Sos un abogado procesalista argentino. Genera un informe BREVE del estado de este expediente.
+
+EXPEDIENTE: ${caseData.nro_expediente || 'N/D'}
+CARATULA: ${caseData.caratula || 'N/D'}
+ACTOR: ${caseData.acto || caseData.actor || 'N/D'}
+DEMANDADO: ${caseData.dema || caseData.demandado || 'N/D'}
+JUZGADO: ${caseData.juzgado?.dscr || caseData.juzgado || 'N/D'}
+TIPO: ${caseData.tipo_proceso || 'N/D'}
+TOTAL TRAMITES: ${tramites.length}
+
+ULTIMOS TRAMITES:
+${tramitesText}
+
+Genera un informe conciso con:
+1. ESTADO ACTUAL (2-3 oraciones)
+2. ULTIMO MOVIMIENTO RELEVANTE (que paso y cuando)
+3. PROXIMOS PASOS PROBABLES
+4. ALERTAS (si hay plazos urgentes o situaciones que requieran atencion)
+
+Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
+
+      const report = await callGemini(apiKey, prompt);
+
+      state.monitorReports.push({
+        nro_expediente: caseData.nro_expediente,
+        caratula: caseData.caratula,
+        actor: caseData.acto || caseData.actor || '',
+        demandado: caseData.dema || caseData.demandado || '',
+        juzgado: caseData.juzgado?.dscr || caseData.juzgado || '',
+        tipo: caseData.tipo_proceso || '',
+        total_tramites: tramites.length,
+        ultimo_movimiento: tramites[0]?.fecha || '',
+        ultimo_tipo: tramites[0]?.dscr || '',
+        informe_ia: report,
+        fecha_informe: new Date().toLocaleDateString('es-AR'),
+      });
+
+    } catch (err) {
+      console.error(`Error report ${caseData.nro_expediente}:`, err);
+      state.monitorReports.push({
+        nro_expediente: caseData.nro_expediente,
+        caratula: caseData.caratula || '',
+        actor: '', demandado: '', juzgado: '', tipo: '',
+        total_tramites: 0, ultimo_movimiento: '', ultimo_tipo: '',
+        informe_ia: `ERROR: ${err.message}`,
+        fecha_informe: new Date().toLocaleDateString('es-AR'),
+      });
+    }
+  }
+
+  statusEl.textContent = `Completado: ${state.monitorReports.length} informes generados`;
+  fillEl.style.width = '100%';
+  btn.disabled = false;
+  btn.textContent = 'Informe IA';
+  updateMonitorToolbar(); // Enable export button
+  showToast(`${state.monitorReports.length} informes generados. Descarga el Excel.`, 'success');
+}
+
+function exportMonitorExcel() {
+  if (!state.monitorReports?.length) {
+    showToast('Genera informes primero', 'error');
+    return;
+  }
+
+  const headers = [
+    'Expediente', 'Caratula', 'Actor', 'Demandado', 'Juzgado',
+    'Tipo', 'Total Tramites', 'Ultimo Movimiento', 'Ultimo Tipo',
+    'Informe IA', 'Fecha Informe'
+  ];
+
+  const rows = state.monitorReports.map(r => [
+    r.nro_expediente, r.caratula, r.actor, r.demandado, r.juzgado,
+    r.tipo, r.total_tramites, r.ultimo_movimiento, r.ultimo_tipo,
+    r.informe_ia, r.fecha_informe,
+  ]);
+
+  // Build Excel using SheetJS
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  // Auto-width columns
+  ws['!cols'] = headers.map((h, i) => {
+    const maxLen = Math.max(h.length, ...rows.map(r => String(r[i] || '').substring(0, 50).length));
+    return { wch: Math.min(maxLen + 2, 60) };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Informes IA');
+
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+
+  const fecha = new Date().toISOString().split('T')[0];
+  chrome.downloads.download({
+    url,
+    filename: `Informes_Seguimiento_${fecha}.xlsx`,
+    saveAs: true,
+  }, () => setTimeout(() => URL.revokeObjectURL(url), 1000));
+}
 
 // Init AI listeners
 function initAIListeners() {

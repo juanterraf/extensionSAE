@@ -619,6 +619,12 @@ body {
   align-items: flex-start;
   gap: 6px;
 }
+.monitor-chk {
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: #7c3aed;
+  flex-shrink: 0;
+}
 .monitor-card-info { flex: 1; min-width: 0; }
 .monitor-card-number {
   font-weight: 600;
