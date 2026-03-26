@@ -1330,7 +1330,7 @@ function renderMonitorList() {
     return `
       <div class="${cardClass}" data-index="${i}">
         <div class="monitor-card-top">
-          <input type="checkbox" class="monitor-chk" data-index="${i}" onclick="event.stopPropagation()">
+          <input type="checkbox" class="monitor-chk" data-index="${i}">
           <div class="monitor-card-info">
             <div class="monitor-card-number">Exp. ${escapeHtml(f.nro_expediente)}</div>
             <div class="monitor-card-title">${escapeHtml(f.caratula)}</div>
@@ -1362,8 +1362,9 @@ function renderMonitorList() {
       saveFollowed();
     });
   });
-  // Checkbox change
+  // Checkbox click - stop propagation and update toolbar
   container.querySelectorAll('.monitor-chk').forEach(chk => {
+    chk.addEventListener('click', (e) => e.stopPropagation());
     chk.addEventListener('change', () => updateMonitorToolbar());
   });
   // Click card to open case
