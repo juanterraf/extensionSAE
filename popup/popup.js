@@ -2076,40 +2076,63 @@ function exportMonitorExcel() {
     return;
   }
 
-  const headers = [
-    'Expediente', 'Caratula', 'Actor', 'Demandado', 'Juzgado',
-    'Tipo', 'Total Tramites', 'Ultimo Movimiento', 'Ultimo Tipo',
-    'Informe IA', 'Fecha Informe'
-  ];
+  try {
+    const headers = [
+      'Expediente', 'Caratula', 'Actor', 'Demandado', 'Juzgado',
+      'Tipo', 'Total Tramites', 'Ultimo Movimiento', 'Ultimo Tipo',
+      'Informe IA', 'Fecha Informe'
+    ];
 
-  const rows = state.monitorReports.map(r => [
-    r.nro_expediente, r.caratula, r.actor, r.demandado, r.juzgado,
-    r.tipo, r.total_tramites, r.ultimo_movimiento, r.ultimo_tipo,
-    r.informe_ia, r.fecha_informe,
-  ]);
+    const rows = state.monitorReports.map(r => [
+      r.nro_expediente || '', r.caratula || '', r.actor || '', r.demandado || '', r.juzgado || '',
+      r.tipo || '', r.total_tramites || 0, r.ultimo_movimiento || '', r.ultimo_tipo || '',
+      r.informe_ia || '', r.fecha_informe || '',
+    ]);
 
-  // Build Excel using SheetJS
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
 
-  // Auto-width columns
-  ws['!cols'] = headers.map((h, i) => {
-    const maxLen = Math.max(h.length, ...rows.map(r => String(r[i] || '').substring(0, 50).length));
-    return { wch: Math.min(maxLen + 2, 60) };
-  });
+    // Auto-width columns
+    ws['!cols'] = headers.map((h, i) => {
+      const maxLen = Math.max(h.length, ...rows.map(r => String(r[i] || '').substring(0, 50).length));
+      return { wch: Math.min(maxLen + 2, 60) };
+    });
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Informes IA');
+    // Wrap text in informe column
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = 1; R <= range.e.r; R++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: 9 })]; // column J = informe
+      if (cell) cell.s = { alignment: { wrapText: true } };
+    }
 
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Informes IA');
 
-  const fecha = new Date().toISOString().split('T')[0];
-  chrome.downloads.download({
-    url,
-    filename: `Informes_Seguimiento_${fecha}.xlsx`,
-    saveAs: true,
-  }, () => setTimeout(() => URL.revokeObjectURL(url), 1000));
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+
+    const fecha = new Date().toISOString().split('T')[0];
+    chrome.downloads.download({
+      url,
+      filename: `Informes_Seguimiento_${fecha}.xlsx`,
+      saveAs: true,
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Download error:', chrome.runtime.lastError);
+        // Fallback: open as link
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Informes_Seguimiento_${fecha}.xlsx`;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    });
+
+    showToast('Excel descargado', 'success');
+  } catch (err) {
+    console.error('Export error:', err);
+    showToast('Error al exportar: ' + err.message, 'error');
+  }
 }
 
 // Init AI listeners
