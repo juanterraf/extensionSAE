@@ -138,21 +138,31 @@
         <p>No estas siguiendo ningun expediente.<br>Abri un expediente y usa "Seguir expediente".</p>
       </div>
       <div id="monitor-content" class="hidden">
-        <div class="monitor-toolbar">
+        <!-- Top bar: count + verify -->
+        <div class="monitor-header">
           <span id="monitor-count" class="monitor-count"></span>
           <button id="btn-check-all" class="btn-sm btn-primary">Verificar todos</button>
         </div>
-        <div class="monitor-toolbar" id="monitor-ai-toolbar" style="margin-top:4px; gap:6px;">
-          <label class="monitor-select-all-label" style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px;">
-            <input type="checkbox" id="chk-select-all-monitor"> Seleccionar todos
+
+        <!-- AI actions bar -->
+        <div class="monitor-actions">
+          <label class="monitor-select-label">
+            <input type="checkbox" id="chk-select-all-monitor"> <span>Todos</span>
           </label>
-          <button id="btn-monitor-ai-report" class="btn-sm" style="background:#7c3aed; color:white;" disabled>Informe IA</button>
-          <button id="btn-monitor-export-xl" class="btn-sm" style="background:#059669; color:white;" disabled>Descargar Excel</button>
+          <div class="monitor-actions-btns">
+            <button id="btn-monitor-ai-report" class="btn-sm btn-ai" disabled>Informe IA</button>
+            <button id="btn-monitor-export-xl" class="btn-sm btn-export" disabled>Excel</button>
+            <button id="btn-monitor-export-pdf" class="btn-sm btn-export-pdf" disabled>PDF</button>
+          </div>
         </div>
-        <div id="monitor-ai-progress" class="hidden" style="margin:8px 0; padding:8px; background:var(--bg-secondary); border-radius:6px; font-size:11px;">
+
+        <!-- Progress -->
+        <div id="monitor-ai-progress" class="monitor-progress hidden">
           <div id="monitor-ai-status">Preparando...</div>
-          <div class="progress-bar" style="margin-top:6px;"><div id="monitor-ai-fill" class="progress-fill"></div></div>
+          <div class="progress-bar"><div id="monitor-ai-fill" class="progress-fill"></div></div>
         </div>
+
+        <!-- Case list -->
         <div id="monitor-list" class="monitor-list"></div>
       </div>
     </section>

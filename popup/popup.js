@@ -1276,6 +1276,7 @@ function initMonitorListeners() {
   $('#btn-check-all').addEventListener('click', checkAllFollowed);
   $('#btn-monitor-ai-report').addEventListener('click', generateMonitorAIReport);
   $('#btn-monitor-export-xl').addEventListener('click', exportMonitorExcel);
+  $('#btn-monitor-export-pdf').addEventListener('click', exportMonitorPDF);
   $('#chk-select-all-monitor').addEventListener('change', (e) => {
     $$('.monitor-chk').forEach(chk => { chk.checked = e.target.checked; });
     updateMonitorToolbar();
@@ -1289,7 +1290,9 @@ function getSelectedMonitorIndices() {
 function updateMonitorToolbar() {
   const count = getSelectedMonitorIndices().length;
   $('#btn-monitor-ai-report').disabled = count === 0;
-  $('#btn-monitor-export-xl').disabled = !state.monitorReports?.length;
+  const hasReports = state.monitorReports?.length > 0;
+  $('#btn-monitor-export-xl').disabled = !hasReports;
+  $('#btn-monitor-export-pdf').disabled = !hasReports;
   $('#btn-monitor-ai-report').textContent = count > 0 ? `Informe IA (${count})` : 'Informe IA';
 }
 
@@ -1983,11 +1986,19 @@ async function generateMonitorAIReport() {
       });
 
       let tramites = [];
+      let proceeding = null;
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         tramites = Array.isArray(data.stories) ? data.stories : [];
+        proceeding = data.proceeding || null;
       } else {
         tramites = Array.isArray(data) ? data : [];
       }
+
+      // Enrich caseData with proceeding info
+      const actor = proceeding?.acto || proceeding?.actor || caseData.acto || caseData.actor || '';
+      const demandado = proceeding?.dema || proceeding?.demandado || caseData.dema || caseData.demandado || '';
+      const juzgado = proceeding?.juzgado?.dscr || caseData.juzgado?.dscr || caseData.juzgado || '';
+      const tipo = proceeding?.tipo_proceso || caseData.tipo_proceso || '';
 
       // Fetch texts for tramites that need it
       const toFetch = tramites.filter(t => !t.texto && t.link);
@@ -2010,10 +2021,10 @@ async function generateMonitorAIReport() {
 
 EXPEDIENTE: ${caseData.nro_expediente || 'N/D'}
 CARATULA: ${caseData.caratula || 'N/D'}
-ACTOR: ${caseData.acto || caseData.actor || 'N/D'}
-DEMANDADO: ${caseData.dema || caseData.demandado || 'N/D'}
-JUZGADO: ${caseData.juzgado?.dscr || caseData.juzgado || 'N/D'}
-TIPO: ${caseData.tipo_proceso || 'N/D'}
+ACTOR: ${actor || 'N/D'}
+DEMANDADO: ${demandado || 'N/D'}
+JUZGADO: ${juzgado || 'N/D'}
+TIPO: ${tipo || 'N/D'}
 TOTAL TRAMITES: ${tramites.length}
 
 ULTIMOS TRAMITES:
@@ -2032,10 +2043,10 @@ Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
       state.monitorReports.push({
         nro_expediente: caseData.nro_expediente,
         caratula: caseData.caratula,
-        actor: caseData.acto || caseData.actor || '',
-        demandado: caseData.dema || caseData.demandado || '',
-        juzgado: caseData.juzgado?.dscr || caseData.juzgado || '',
-        tipo: caseData.tipo_proceso || '',
+        actor,
+        demandado,
+        juzgado,
+        tipo,
         total_tramites: tramites.length,
         ultimo_movimiento: tramites[0]?.fecha || '',
         ultimo_tipo: tramites[0]?.dscr || '',
@@ -2068,6 +2079,75 @@ Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
   setTimeout(() => {
     statusEl.textContent = `${state.monitorReports.length} informes listos. Podes volver a descargar con el boton verde.`;
   }, 2000);
+}
+
+function exportMonitorPDF() {
+  if (!state.monitorReports?.length) {
+    showToast('Genera informes primero', 'error');
+    return;
+  }
+
+  const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const reportsHtml = state.monitorReports.map((r, i) => `
+    <div class="case-report" ${i > 0 ? 'style="page-break-before:always"' : ''}>
+      <div class="case-header">
+        <h2>Exp. ${r.nro_expediente}</h2>
+        <p class="caratula">${r.caratula}</p>
+      </div>
+      <table class="case-meta">
+        <tr><td><strong>Actor:</strong></td><td>${r.actor || 'N/D'}</td><td><strong>Demandado:</strong></td><td>${r.demandado || 'N/D'}</td></tr>
+        <tr><td><strong>Juzgado:</strong></td><td colspan="3">${r.juzgado || 'N/D'}</td></tr>
+        <tr><td><strong>Tipo:</strong></td><td>${r.tipo || 'N/D'}</td><td><strong>Tramites:</strong></td><td>${r.total_tramites}</td></tr>
+        <tr><td><strong>Ultimo mov.:</strong></td><td>${r.ultimo_movimiento || 'N/D'}</td><td><strong>Tipo:</strong></td><td>${r.ultimo_tipo || 'N/D'}</td></tr>
+      </table>
+      <div class="informe">${r.informe_ia.replace(/\n/g, '<br>')}</div>
+    </div>
+  `).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informes de Seguimiento - ${fecha}</title>
+<style>
+  @page { margin: 2cm; size: A4; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; font-size: 13px; line-height: 1.5; margin: 0; padding: 20px; }
+  .cover { text-align: center; padding: 60px 20px; page-break-after: always; }
+  .cover h1 { font-size: 24px; color: #1e293b; margin-bottom: 8px; }
+  .cover .subtitle { font-size: 14px; color: #64748b; }
+  .cover .date { font-size: 13px; color: #94a3b8; margin-top: 20px; }
+  .cover .footer { margin-top: 60px; font-size: 11px; color: #94a3b8; }
+  .case-report { margin-bottom: 30px; }
+  .case-header { border-bottom: 2px solid #7c3aed; padding-bottom: 8px; margin-bottom: 12px; }
+  .case-header h2 { margin: 0; font-size: 16px; color: #7c3aed; }
+  .case-header .caratula { margin: 4px 0 0; font-size: 13px; color: #475569; }
+  .case-meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 12px; }
+  .case-meta td { padding: 3px 8px 3px 0; color: #475569; }
+  .case-meta strong { color: #1e293b; }
+  .informe { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; font-size: 12.5px; line-height: 1.6; }
+  @media print {
+    body { padding: 0; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <h1>Informes de Seguimiento</h1>
+    <div class="subtitle">${state.monitorReports.length} expediente${state.monitorReports.length > 1 ? 's' : ''} analizados con IA</div>
+    <div class="date">${fecha}</div>
+    <div class="footer">Generado por SAE Tucuman - Asistente de Expedientes<br>Juan Pablo Terraf — derechointeligente.com.ar</div>
+  </div>
+  ${reportsHtml}
+  <script>window.onload = () => window.print();</script>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  chrome.tabs.create({ url }, () => {
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
 }
 
 function exportMonitorExcel() {

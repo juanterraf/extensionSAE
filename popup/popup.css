@@ -587,15 +587,59 @@ body {
 .history-item-delete:hover { color: var(--danger); }
 
 /* ---- Monitor ---- */
-.monitor-toolbar {
+.monitor-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .monitor-count {
   font-size: 11px;
   color: var(--text-muted);
+}
+.monitor-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.monitor-select-label {
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+.monitor-select-label input { accent-color: #7c3aed; }
+.monitor-actions-btns {
+  display: flex;
+  gap: 4px;
+}
+.btn-ai {
+  background: #7c3aed !important;
+  color: white !important;
+}
+.btn-ai:disabled { opacity: 0.4; }
+.btn-export {
+  background: #059669 !important;
+  color: white !important;
+}
+.btn-export:disabled { opacity: 0.4; }
+.btn-export-pdf {
+  background: #dc2626 !important;
+  color: white !important;
+}
+.btn-export-pdf:disabled { opacity: 0.4; }
+.monitor-progress {
+  margin: 6px 0;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
 }
 .monitor-list {
   display: flex;
