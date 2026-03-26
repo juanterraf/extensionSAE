@@ -2056,12 +2056,18 @@ Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
     }
   }
 
-  statusEl.textContent = `Completado: ${state.monitorReports.length} informes generados`;
+  statusEl.textContent = `Completado: ${state.monitorReports.length} informes generados. Descargando Excel...`;
   fillEl.style.width = '100%';
   btn.disabled = false;
   btn.textContent = 'Informe IA';
-  updateMonitorToolbar(); // Enable export button
-  showToast(`${state.monitorReports.length} informes generados. Descarga el Excel.`, 'success');
+  updateMonitorToolbar();
+
+  // Auto-download Excel
+  exportMonitorExcel();
+
+  setTimeout(() => {
+    statusEl.textContent = `${state.monitorReports.length} informes listos. Podes volver a descargar con el boton verde.`;
+  }, 2000);
 }
 
 function exportMonitorExcel() {
