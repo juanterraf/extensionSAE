@@ -272,10 +272,8 @@ async function loadCenters() {
     const centers = await apiGet('/centers');
     state.centers = Array.isArray(centers) ? centers : [];
     const sel = $('#sel-center');
-    sel.innerHTML = '<option value="">Seleccione un centro</option>';
-    state.centers.forEach(c => {
-      sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
-    });
+    sel.innerHTML = '<option value="">Seleccione un centro</option>' +
+      state.centers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
   } catch {
     $('#sel-center').innerHTML = '<option value="">Error al cargar centros</option>';
   }
@@ -995,11 +993,6 @@ async function downloadSingleFile(histid, filename) {
   }
 }
 
-function updateProgress(current, total, fillEl, textEl) {
-  const pct = Math.round((current / total) * 100);
-  fillEl.style.width = `${pct}%`;
-  textEl.textContent = `Procesando... ${current}/${total} (${pct}%)`;
-}
 
 // ---- Copy Summary ----
 function copySummary() {
@@ -1183,15 +1176,7 @@ function showToast(message, type = 'info') {
   toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return 'N/D';
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  } catch {
-    return dateStr;
-  }
-}
+
 
 function timeAgo(timestamp) {
   const diff = Date.now() - timestamp;
@@ -1204,10 +1189,9 @@ function timeAgo(timestamp) {
   return `Hace ${days}d`;
 }
 
+const _escapeMap = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text).replace(/[&<>"']/g, c => _escapeMap[c]);
 }
 
 function sanitizeFilename(name) {
@@ -1282,7 +1266,11 @@ function initMonitorListeners() {
     $$('.monitor-chk').forEach(chk => { chk.checked = e.target.checked; });
     updateMonitorToolbar();
   });
-  $('#inp-monitor-search').addEventListener('input', renderMonitorList);
+  let _searchTimer;
+  $('#inp-monitor-search').addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(renderMonitorList, 150);
+  });
 }
 
 function getSelectedMonitorIndices() {
@@ -1301,12 +1289,12 @@ function updateMonitorToolbar() {
 }
 
 function deleteSelectedFollowed() {
-  const indices = getSelectedMonitorIndices();
-  if (!indices.length) return;
-  indices.sort((a, b) => b - a).forEach(i => state.followed.splice(i, 1));
+  const indices = new Set(getSelectedMonitorIndices());
+  if (!indices.size) return;
+  state.followed = state.followed.filter((_, i) => !indices.has(i));
   saveFollowed();
   $('#chk-select-all-monitor').checked = false;
-  showToast(`${indices.length} expediente(s) eliminados`, 'success');
+  showToast(`${indices.size} expediente(s) eliminados`, 'success');
 }
 
 function renderMonitorList() {
@@ -1345,6 +1333,12 @@ function renderMonitorList() {
       })
     : sortedIndices;
 
+  // Build report lookup map
+  const reportMap = new Map();
+  if (state.monitorReports?.length) {
+    state.monitorReports.forEach(r => reportMap.set(r.nro_expediente, r));
+  }
+
   container.innerHTML = filteredIndices.map(i => {
     const f = state.followed[i];
     const hasNew = f.new_count > 0;
@@ -1355,8 +1349,7 @@ function renderMonitorList() {
       ? `${f.last_fecha} — ${(f.last_dscr || '').substring(0, 40)}`
       : 'Sin verificar';
 
-    // Check for inline report
-    const report = state.monitorReports?.find(r => r.nro_expediente === f.nro_expediente);
+    const report = reportMap.get(f.nro_expediente);
     const reportHtml = report ? `
       <div class="monitor-report">
         <div class="monitor-report-toggle" data-rindex="${i}">▶ Ver informe IA</div>
@@ -2000,6 +1993,15 @@ async function generateMonitorAIReport() {
   const cases = selectedIndices.map(i => state.followed[i]).filter(Boolean);
   let completed = 0;
 
+  const reportLength = $('#sel-report-length')?.value || 'medium';
+  const tramiteSlice = reportLength === 'short' ? 5 : reportLength === 'long' ? 30 : 15;
+  const maxChars = reportLength === 'short' ? 400 : reportLength === 'long' ? 1200 : 800;
+  const lengthInstructions = {
+    short: `Genera un parrafo de 3-4 oraciones con el estado actual y si hay algo urgente. Maximo 80 palabras.`,
+    medium: `Genera un informe conciso con:\n1. ESTADO ACTUAL (2-3 oraciones)\n2. ULTIMO MOVIMIENTO RELEVANTE\n3. PROXIMOS PASOS PROBABLES\n4. ALERTAS (si hay plazos urgentes)\nMaximo 200 palabras.`,
+    long: `Genera un informe completo con:\n1. RESUMEN EJECUTIVO (estado actual)\n2. OBJETO DE LA CAUSA\n3. CRONOLOGIA PROCESAL RELEVANTE (solo hitos importantes)\n4. ESTADO ACTUAL Y PROXIMOS PASOS\n5. ALERTAS Y OBSERVACIONES\nMaximo 500 palabras.`,
+  };
+
   for (const caseData of cases) {
     completed++;
     const pct = Math.round((completed / cases.length) * 100);
@@ -2040,32 +2042,12 @@ async function generateMonitorAIReport() {
 
       // Build AI prompt based on selected length
       statusEl.textContent = `IA analizando ${caseData.nro_expediente}...`;
-      const reportLength = $('#sel-report-length')?.value || 'medium';
-      const tramiteSlice = reportLength === 'short' ? 5 : reportLength === 'long' ? 30 : 15;
-      const maxChars = reportLength === 'short' ? 400 : reportLength === 'long' ? 1200 : 800;
 
       const tramitesText = tramites.slice(0, tramiteSlice).map((t, i) => {
         const texto = t.texto ? htmlToPlainText(t.texto) : '';
         const content = texto.length > maxChars ? texto.substring(0, maxChars) + '...' : texto;
         return `[${i + 1}] ${t.fecha || 'S/F'} | ${t.dscr || ''}\n${content}`;
       }).join('\n---\n');
-
-      const lengthInstructions = {
-        short: `Genera un parrafo de 3-4 oraciones con el estado actual y si hay algo urgente. Maximo 80 palabras.`,
-        medium: `Genera un informe conciso con:
-1. ESTADO ACTUAL (2-3 oraciones)
-2. ULTIMO MOVIMIENTO RELEVANTE
-3. PROXIMOS PASOS PROBABLES
-4. ALERTAS (si hay plazos urgentes)
-Maximo 200 palabras.`,
-        long: `Genera un informe completo con:
-1. RESUMEN EJECUTIVO (estado actual)
-2. OBJETO DE LA CAUSA
-3. CRONOLOGIA PROCESAL RELEVANTE (solo hitos importantes)
-4. ESTADO ACTUAL Y PROXIMOS PASOS
-5. ALERTAS Y OBSERVACIONES
-Maximo 500 palabras.`,
-      };
 
       const prompt = `Sos un abogado procesalista argentino.
 
