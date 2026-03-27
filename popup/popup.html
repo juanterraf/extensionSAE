@@ -138,22 +138,35 @@
         <p>No estas siguiendo ningun expediente.<br>Abri un expediente y usa "Seguir expediente".</p>
       </div>
       <div id="monitor-content" class="hidden">
-        <!-- Top bar: count + verify -->
-        <div class="monitor-header">
-          <span id="monitor-count" class="monitor-count"></span>
-          <button id="btn-check-all" class="btn-sm btn-primary">Verificar todos</button>
+        <!-- Search -->
+        <div class="monitor-search">
+          <input type="text" id="inp-monitor-search" placeholder="Buscar por expediente, actor o demandado..." autocomplete="off">
         </div>
 
-        <!-- AI actions bar -->
-        <div class="monitor-actions">
-          <label class="monitor-select-label">
-            <input type="checkbox" id="chk-select-all-monitor"> <span>Todos</span>
-          </label>
-          <div class="monitor-actions-btns">
-            <button id="btn-monitor-ai-report" class="btn-sm btn-ai" disabled>Informe IA</button>
-            <button id="btn-monitor-export-xl" class="btn-sm btn-export" disabled>Excel</button>
-            <button id="btn-monitor-export-pdf" class="btn-sm btn-export-pdf" disabled>PDF</button>
+        <!-- Toolbar -->
+        <div class="monitor-toolbar-row">
+          <div class="monitor-toolbar-left">
+            <label class="monitor-select-label" title="Seleccionar todos">
+              <input type="checkbox" id="chk-select-all-monitor">
+            </label>
+            <span id="monitor-count" class="monitor-count"></span>
           </div>
+          <div class="monitor-toolbar-right">
+            <button id="btn-check-all" class="btn-sm btn-outline" title="Verificar novedades">Verificar</button>
+            <button id="btn-monitor-delete" class="btn-sm btn-danger" title="Eliminar seleccionados" disabled>Eliminar</button>
+          </div>
+        </div>
+
+        <!-- AI bar -->
+        <div class="monitor-ai-bar">
+          <select id="sel-report-length" class="monitor-select-length" title="Largo del informe">
+            <option value="short">Corto</option>
+            <option value="medium" selected>Medio</option>
+            <option value="long">Largo</option>
+          </select>
+          <button id="btn-monitor-ai-report" class="btn-sm btn-ai" disabled>Informe IA</button>
+          <button id="btn-monitor-export-xl" class="btn-sm btn-export" disabled>Excel</button>
+          <button id="btn-monitor-export-pdf" class="btn-sm btn-export-pdf" disabled>PDF</button>
         </div>
 
         <!-- Progress -->
@@ -162,7 +175,7 @@
           <div class="progress-bar"><div id="monitor-ai-fill" class="progress-fill"></div></div>
         </div>
 
-        <!-- Case list -->
+        <!-- Case list with inline reports -->
         <div id="monitor-list" class="monitor-list"></div>
       </div>
     </section>

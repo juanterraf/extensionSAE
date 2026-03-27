@@ -1277,10 +1277,12 @@ function initMonitorListeners() {
   $('#btn-monitor-ai-report').addEventListener('click', generateMonitorAIReport);
   $('#btn-monitor-export-xl').addEventListener('click', exportMonitorExcel);
   $('#btn-monitor-export-pdf').addEventListener('click', exportMonitorPDF);
+  $('#btn-monitor-delete').addEventListener('click', deleteSelectedFollowed);
   $('#chk-select-all-monitor').addEventListener('change', (e) => {
     $$('.monitor-chk').forEach(chk => { chk.checked = e.target.checked; });
     updateMonitorToolbar();
   });
+  $('#inp-monitor-search').addEventListener('input', renderMonitorList);
 }
 
 function getSelectedMonitorIndices() {
@@ -1290,10 +1292,21 @@ function getSelectedMonitorIndices() {
 function updateMonitorToolbar() {
   const count = getSelectedMonitorIndices().length;
   $('#btn-monitor-ai-report').disabled = count === 0;
+  $('#btn-monitor-delete').disabled = count === 0;
+  $('#btn-monitor-delete').textContent = count > 0 ? `Eliminar (${count})` : 'Eliminar';
   const hasReports = state.monitorReports?.length > 0;
   $('#btn-monitor-export-xl').disabled = !hasReports;
   $('#btn-monitor-export-pdf').disabled = !hasReports;
   $('#btn-monitor-ai-report').textContent = count > 0 ? `Informe IA (${count})` : 'Informe IA';
+}
+
+function deleteSelectedFollowed() {
+  const indices = getSelectedMonitorIndices();
+  if (!indices.length) return;
+  indices.sort((a, b) => b - a).forEach(i => state.followed.splice(i, 1));
+  saveFollowed();
+  $('#chk-select-all-monitor').checked = false;
+  showToast(`${indices.length} expediente(s) eliminados`, 'success');
 }
 
 function renderMonitorList() {
@@ -1311,6 +1324,9 @@ function renderMonitorList() {
   contentEl.classList.remove('hidden');
   $('#monitor-count').textContent = `${state.followed.length} causa${state.followed.length > 1 ? 's' : ''}`;
 
+  // Filter by search
+  const searchTerm = ($('#inp-monitor-search')?.value || '').toLowerCase().trim();
+
   // Sort: cases with new movements first
   const sortedIndices = state.followed.map((f, i) => i);
   sortedIndices.sort((a, b) => {
@@ -1320,7 +1336,16 @@ function renderMonitorList() {
     return (state.followed[b].last_check || 0) - (state.followed[a].last_check || 0);
   });
 
-  container.innerHTML = sortedIndices.map(i => {
+  // Apply filter
+  const filteredIndices = searchTerm
+    ? sortedIndices.filter(i => {
+        const f = state.followed[i];
+        const searchable = `${f.nro_expediente} ${f.caratula} ${f.actor || ''} ${f.demandado || ''} ${f.acto || ''} ${f.dema || ''}`.toLowerCase();
+        return searchable.includes(searchTerm);
+      })
+    : sortedIndices;
+
+  container.innerHTML = filteredIndices.map(i => {
     const f = state.followed[i];
     const hasNew = f.new_count > 0;
     const badgeClass = hasNew ? 'badge-new' : 'badge-ok';
@@ -1329,6 +1354,14 @@ function renderMonitorList() {
     const statusText = f.last_fecha
       ? `${f.last_fecha} — ${(f.last_dscr || '').substring(0, 40)}`
       : 'Sin verificar';
+
+    // Check for inline report
+    const report = state.monitorReports?.find(r => r.nro_expediente === f.nro_expediente);
+    const reportHtml = report ? `
+      <div class="monitor-report">
+        <div class="monitor-report-toggle" data-rindex="${i}">▶ Ver informe IA</div>
+        <div class="monitor-report-body" data-rindex="${i}">${escapeHtml(report.informe_ia)}</div>
+      </div>` : '';
 
     return `
       <div class="${cardClass}" data-index="${i}">
@@ -1342,33 +1375,29 @@ function renderMonitorList() {
         </div>
         <div class="monitor-card-bottom">
           <span class="monitor-card-status">${statusText}</span>
-          <div class="monitor-card-actions">
-            <button class="btn-sm btn-primary monitor-check" data-index="${i}">Verificar</button>
-            <button class="btn-sm btn-danger monitor-unfollow" data-index="${i}">Quitar</button>
-          </div>
         </div>
+        ${reportHtml}
       </div>
     `;
   }).join('');
 
+  if (!filteredIndices.length && searchTerm) {
+    container.innerHTML = '<div class="empty-state"><p>Sin resultados para "' + escapeHtml(searchTerm) + '"</p></div>';
+  }
+
   // Event handlers
-  container.querySelectorAll('.monitor-check').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      checkSingleFollowed(parseInt(btn.dataset.index));
-    });
-  });
-  container.querySelectorAll('.monitor-unfollow').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      state.followed.splice(parseInt(btn.dataset.index), 1);
-      saveFollowed();
-    });
-  });
-  // Checkbox click - stop propagation and update toolbar
   container.querySelectorAll('.monitor-chk').forEach(chk => {
     chk.addEventListener('click', (e) => e.stopPropagation());
     chk.addEventListener('change', () => updateMonitorToolbar());
+  });
+  // Accordion toggles
+  container.querySelectorAll('.monitor-report-toggle').forEach(toggle => {
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const body = container.querySelector(`.monitor-report-body[data-rindex="${toggle.dataset.rindex}"]`);
+      body.classList.toggle('open');
+      toggle.textContent = body.classList.contains('open') ? '▼ Ocultar informe IA' : '▶ Ver informe IA';
+    });
   });
   // Click card to open case
   container.querySelectorAll('.monitor-card').forEach(card => {
@@ -2009,34 +2038,46 @@ async function generateMonitorAIReport() {
         } catch { /* skip */ }
       }
 
-      // Build AI prompt
+      // Build AI prompt based on selected length
       statusEl.textContent = `IA analizando ${caseData.nro_expediente}...`;
-      const tramitesText = tramites.slice(0, 20).map((t, i) => {
+      const reportLength = $('#sel-report-length')?.value || 'medium';
+      const tramiteSlice = reportLength === 'short' ? 5 : reportLength === 'long' ? 30 : 15;
+      const maxChars = reportLength === 'short' ? 400 : reportLength === 'long' ? 1200 : 800;
+
+      const tramitesText = tramites.slice(0, tramiteSlice).map((t, i) => {
         const texto = t.texto ? htmlToPlainText(t.texto) : '';
-        const content = texto.length > 800 ? texto.substring(0, 800) + '...' : texto;
+        const content = texto.length > maxChars ? texto.substring(0, maxChars) + '...' : texto;
         return `[${i + 1}] ${t.fecha || 'S/F'} | ${t.dscr || ''}\n${content}`;
       }).join('\n---\n');
 
-      const prompt = `Sos un abogado procesalista argentino. Genera un informe BREVE del estado de este expediente.
+      const lengthInstructions = {
+        short: `Genera un parrafo de 3-4 oraciones con el estado actual y si hay algo urgente. Maximo 80 palabras.`,
+        medium: `Genera un informe conciso con:
+1. ESTADO ACTUAL (2-3 oraciones)
+2. ULTIMO MOVIMIENTO RELEVANTE
+3. PROXIMOS PASOS PROBABLES
+4. ALERTAS (si hay plazos urgentes)
+Maximo 200 palabras.`,
+        long: `Genera un informe completo con:
+1. RESUMEN EJECUTIVO (estado actual)
+2. OBJETO DE LA CAUSA
+3. CRONOLOGIA PROCESAL RELEVANTE (solo hitos importantes)
+4. ESTADO ACTUAL Y PROXIMOS PASOS
+5. ALERTAS Y OBSERVACIONES
+Maximo 500 palabras.`,
+      };
 
-EXPEDIENTE: ${caseData.nro_expediente || 'N/D'}
-CARATULA: ${caseData.caratula || 'N/D'}
-ACTOR: ${actor || 'N/D'}
-DEMANDADO: ${demandado || 'N/D'}
-JUZGADO: ${juzgado || 'N/D'}
-TIPO: ${tipo || 'N/D'}
-TOTAL TRAMITES: ${tramites.length}
+      const prompt = `Sos un abogado procesalista argentino.
+
+Exp. ${caseData.nro_expediente || 'N/D'} — ${caseData.caratula || 'N/D'}
+Tramites: ${tramites.length}
 
 ULTIMOS TRAMITES:
 ${tramitesText}
 
-Genera un informe conciso con:
-1. ESTADO ACTUAL (2-3 oraciones)
-2. ULTIMO MOVIMIENTO RELEVANTE (que paso y cuando)
-3. PROXIMOS PASOS PROBABLES
-4. ALERTAS (si hay plazos urgentes o situaciones que requieran atencion)
+${lengthInstructions[reportLength]}
 
-Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
+Lenguaje juridico argentino. No inventes datos.`;
 
       const report = await callGemini(apiKey, prompt);
 
@@ -2067,18 +2108,12 @@ Maximo 300 palabras. Lenguaje juridico argentino. No inventes datos.`;
     }
   }
 
-  statusEl.textContent = `Completado: ${state.monitorReports.length} informes generados. Descargando Excel...`;
+  statusEl.textContent = `${state.monitorReports.length} informes generados. Descarga con Excel o PDF.`;
   fillEl.style.width = '100%';
   btn.disabled = false;
   btn.textContent = 'Informe IA';
   updateMonitorToolbar();
-
-  // Auto-download Excel
-  exportMonitorExcel();
-
-  setTimeout(() => {
-    statusEl.textContent = `${state.monitorReports.length} informes listos. Podes volver a descargar con el boton verde.`;
-  }, 2000);
+  renderMonitorList(); // Re-render to show inline reports
 }
 
 function exportMonitorPDF() {
@@ -2091,16 +2126,11 @@ function exportMonitorPDF() {
   const reportsHtml = state.monitorReports.map((r, i) => `
     <div class="case-report" ${i > 0 ? 'style="page-break-before:always"' : ''}>
       <div class="case-header">
-        <h2>Exp. ${r.nro_expediente}</h2>
-        <p class="caratula">${r.caratula}</p>
+        <h2>Exp. ${escapeHtml(r.nro_expediente)}</h2>
+        <p class="caratula">${escapeHtml(r.caratula)}</p>
       </div>
-      <table class="case-meta">
-        <tr><td><strong>Actor:</strong></td><td>${r.actor || 'N/D'}</td><td><strong>Demandado:</strong></td><td>${r.demandado || 'N/D'}</td></tr>
-        <tr><td><strong>Juzgado:</strong></td><td colspan="3">${r.juzgado || 'N/D'}</td></tr>
-        <tr><td><strong>Tipo:</strong></td><td>${r.tipo || 'N/D'}</td><td><strong>Tramites:</strong></td><td>${r.total_tramites}</td></tr>
-        <tr><td><strong>Ultimo mov.:</strong></td><td>${r.ultimo_movimiento || 'N/D'}</td><td><strong>Tipo:</strong></td><td>${r.ultimo_tipo || 'N/D'}</td></tr>
-      </table>
-      <div class="informe">${r.informe_ia.replace(/\n/g, '<br>')}</div>
+      <div class="informe">${escapeHtml(r.informe_ia).replace(/\n/g, '<br>')}</div>
+      <div class="case-footer">${r.ultimo_movimiento ? 'Ultimo mov: ' + escapeHtml(r.ultimo_movimiento) + ' — ' + escapeHtml(r.ultimo_tipo || '') : ''}</div>
     </div>
   `).join('');
 
@@ -2121,10 +2151,8 @@ function exportMonitorPDF() {
   .case-header { border-bottom: 2px solid #7c3aed; padding-bottom: 8px; margin-bottom: 12px; }
   .case-header h2 { margin: 0; font-size: 16px; color: #7c3aed; }
   .case-header .caratula { margin: 4px 0 0; font-size: 13px; color: #475569; }
-  .case-meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 12px; }
-  .case-meta td { padding: 3px 8px 3px 0; color: #475569; }
-  .case-meta strong { color: #1e293b; }
   .informe { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; font-size: 12.5px; line-height: 1.6; }
+  .case-footer { font-size: 11px; color: #94a3b8; margin-top: 8px; }
   @media print {
     body { padding: 0; }
     .no-print { display: none; }
@@ -2158,15 +2186,15 @@ function exportMonitorExcel() {
 
   try {
     const headers = [
-      'Expediente', 'Caratula', 'Actor', 'Demandado', 'Juzgado',
-      'Tipo', 'Total Tramites', 'Ultimo Movimiento', 'Ultimo Tipo',
-      'Informe IA', 'Fecha Informe'
+      'Expediente', 'Caratula', 'Ultimo Movimiento', 'Informe IA', 'Fecha'
     ];
 
     const rows = state.monitorReports.map(r => [
-      r.nro_expediente || '', r.caratula || '', r.actor || '', r.demandado || '', r.juzgado || '',
-      r.tipo || '', r.total_tramites || 0, r.ultimo_movimiento || '', r.ultimo_tipo || '',
-      r.informe_ia || '', r.fecha_informe || '',
+      r.nro_expediente || '',
+      r.caratula || '',
+      r.ultimo_movimiento ? `${r.ultimo_movimiento} - ${r.ultimo_tipo || ''}` : '',
+      r.informe_ia || '',
+      r.fecha_informe || '',
     ]);
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -2180,7 +2208,7 @@ function exportMonitorExcel() {
     // Wrap text in informe column
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = 1; R <= range.e.r; R++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: 9 })]; // column J = informe
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: 3 })]; // column D = informe
       if (cell) cell.s = { alignment: { wrapText: true } };
     }
 
