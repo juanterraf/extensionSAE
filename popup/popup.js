@@ -1283,7 +1283,7 @@ function updateMonitorToolbar() {
   $('#btn-monitor-delete').disabled = count === 0;
   $('#btn-monitor-delete').textContent = count > 0 ? `Eliminar (${count})` : 'Eliminar';
   const hasReports = state.monitorReports?.length > 0;
-  $('#btn-monitor-export-xl').disabled = !hasReports;
+  $('#btn-monitor-export-xl').disabled = count === 0 && !hasReports;
   $('#btn-monitor-export-pdf').disabled = !hasReports;
   $('#btn-monitor-ai-report').textContent = count > 0 ? `Informe IA (${count})` : 'Informe IA';
 }
@@ -2167,35 +2167,48 @@ function exportMonitorExcel() {
   }
 
   try {
-    const headers = [
-      'Expediente', 'Caratula', 'Ultimo Movimiento', 'Informe IA', 'Fecha'
-    ];
+    // If we have AI reports, export those. Otherwise export selected cases as nomina.
+    let headers, rows, sheetName;
 
-    const rows = state.monitorReports.map(r => [
-      r.nro_expediente || '',
-      r.caratula || '',
-      r.ultimo_movimiento ? `${r.ultimo_movimiento} - ${r.ultimo_tipo || ''}` : '',
-      r.informe_ia || '',
-      r.fecha_informe || '',
-    ]);
+    if (state.monitorReports?.length) {
+      headers = ['Expediente', 'Caratula', 'Ultimo Movimiento', 'Informe IA', 'Fecha'];
+      rows = state.monitorReports.map(r => [
+        r.nro_expediente || '', r.caratula || '',
+        r.ultimo_movimiento ? `${r.ultimo_movimiento} - ${r.ultimo_tipo || ''}` : '',
+        r.informe_ia || '', r.fecha_informe || '',
+      ]);
+      sheetName = 'Informes IA';
+    } else {
+      const indices = getSelectedMonitorIndices();
+      const cases = indices.map(i => state.followed[i]).filter(Boolean);
+      headers = ['Expediente', 'Caratula', 'Juzgado', 'Ultimo Movimiento', 'Estado'];
+      rows = cases.map(f => [
+        f.nro_expediente || '', f.caratula || '', f.juzgado || '',
+        f.last_fecha ? `${f.last_fecha} - ${f.last_dscr || ''}` : '',
+        f.new_count > 0 ? `${f.new_count} nuevos` : 'Al dia',
+      ]);
+      sheetName = 'Seguimiento';
+    }
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
 
-    // Auto-width columns
     ws['!cols'] = headers.map((h, i) => {
       const maxLen = Math.max(h.length, ...rows.map(r => String(r[i] || '').substring(0, 50).length));
       return { wch: Math.min(maxLen + 2, 60) };
     });
 
-    // Wrap text in informe column
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let R = 1; R <= range.e.r; R++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: R, c: 3 })]; // column D = informe
-      if (cell) cell.s = { alignment: { wrapText: true } };
+    // Wrap text in last content column
+    const infCol = headers.indexOf('Informe IA');
+    if (infCol >= 0) {
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let R = 1; R <= range.e.r; R++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: infCol })];
+        if (cell) cell.s = { alignment: { wrapText: true } };
+      }
     }
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Informes IA');
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
